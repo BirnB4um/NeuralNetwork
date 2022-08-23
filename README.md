@@ -1,2 +1,2 @@
 # NeuralNetwork
-has a few bugs
+simple neural network with a few bugs
