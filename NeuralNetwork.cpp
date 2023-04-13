@@ -486,9 +486,6 @@ bool NeuralNetwork::cut_network(int start_layer, int end_layer) {
 
 void NeuralNetwork::save_to_file(std::string file) {
 
-	if (sizeof(float) != 4)
-		return;
-
 	if (!network_created)
 		return;
 
@@ -548,9 +545,6 @@ void NeuralNetwork::save_to_file(std::string file) {
 }
 
 bool NeuralNetwork::load_from_file(std::string file) {
-
-	if (sizeof(float) != 4)
-		return false;
 
 	std::ifstream input(file, std::ios::binary);
 	if (!input.is_open()) {
