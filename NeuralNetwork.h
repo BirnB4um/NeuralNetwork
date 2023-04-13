@@ -7,7 +7,7 @@
 #include <string>
 
 #define e 2.7182818284
-#define pi 3.141592653
+#define pi_ 3.141592653
 
 //loss functions
 #define MSE 101
@@ -21,8 +21,10 @@
 class NeuralNetwork
 {
 private:
+	bool network_created;
 	int last_layer_index;
 	bool output_error_to_file;
+	float* all_gradients;
 	std::string output_error_file;
 	std::ofstream error_file;
 
@@ -58,15 +60,26 @@ public:
 	void add_layer(int nodes, int activation_function = 0);
 	void create();
 	void copy_output(float* out);
-	void randomise_network();
+	void randomise_network(float min = -1.0f, float max = 1.0f);
 
 	float* forward(float* input);
+	float* forward_from_layer(float* input, int layer_index);
 	void backward(float learning_rate);
+	float* get_output_from_layer(int layer_index);
 
-	float train_once(float* input, float* answer, const int loss_function, const float learning_rate = 0.01);
-	float train_batch(float** input, float** answer, const int batch_length, const int loss_function, const float learning_rate = 0.01);
-	void train_list(float** input, float** answer, const int list_length, const int loss_function, const float learning_rate = 0.01, const int epoches = 1, const bool print_to_console = true);
+	float train_once(float* input, float* answer, const int loss_function, const float learning_rate = 0.001);
+	/*
+	training a batch happens on a single thread
+	*/
+	float train_batch(float** input, float** answer, const int batch_length, const int loss_function, const float learning_rate = 0.001);
+	void train_list(float** input, float** answer, const int list_length, const int loss_function, const float learning_rate = 0.001, const int epoches = 1, const bool print_to_console = true);
+
+	/*
+	start_layer must be smaller than end_layer
+	returns false if something failed
+	*/
+	bool cut_network(int start_layer, int end_layer);
 
 	void save_to_file(std::string file);
-	void load_from_file(std::string file);
+	bool load_from_file(std::string file);
 };

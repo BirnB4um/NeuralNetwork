@@ -2,17 +2,27 @@
 
 NeuralNetwork::NeuralNetwork() {
 	output_error_to_file = false;
+	network_created = false;
+	all_gradients = nullptr;
+	last_layer_index = -1;
 
 	value_lists = nullptr;
 	original_value_lists = nullptr;
 	weight_lists = nullptr;
 	bias_lists = nullptr;
+
+	if (sizeof(float) != 4) {
+		std::cout << "Warning! the size of a float is not 4 bytes. The network should work just fine, but saving and loading the model is not possible" << std::endl;
+	}
 }
 NeuralNetwork::~NeuralNetwork() {
 	delete_data();
 }
 
 void NeuralNetwork::delete_data() {
+	if (!network_created)
+		return;
+
 	if (original_value_lists != nullptr) {
 		for (int i = 0; i < node_list.size(); i++) {
 			if (original_value_lists[i] != nullptr) {
@@ -49,12 +59,18 @@ void NeuralNetwork::delete_data() {
 		delete[] bias_lists;
 	}
 
+	if (all_gradients != nullptr) {
+		delete[] all_gradients;
+	}
+
 	last_layer_index = 0;
 	node_list.clear();
 	activation_function_list.clear();
 }
 
 void NeuralNetwork::copy_output(float* out) {
+	if (!network_created)
+		return;
 	memcpy(out, value_lists[last_layer_index], sizeof(float) * node_list[last_layer_index]);
 }
 
@@ -77,62 +93,76 @@ void NeuralNetwork::set_output_error_to_file(bool should_ouput_to_file, std::str
 }
 
 void NeuralNetwork::add_layer(int nodes, int activation_function) {
+	if (network_created)
+		return;
+
 	node_list.push_back(nodes);
 	activation_function_list.push_back(activation_function);
 }
 
 void NeuralNetwork::create() {
 	//total_weight_list_size = 0;
+	if (network_created)
+		return;
 
-	activation_function_list.erase(activation_function_list.end() - 1);
+	activation_function_list.erase(activation_function_list.begin());
 	last_layer_index = node_list.size() - 1;
 
 	value_lists = new float* [node_list.size()];
 	original_value_lists = new float* [node_list.size()];
-	for (int i = 0; i < node_list.size(); i++) {
+	for (int i = 0; i < node_list.size(); ++i) {
 		value_lists[i] = new float[node_list[i]];
 		original_value_lists[i] = new float[node_list[i]];
 	}
 
 	weight_lists = new float* [last_layer_index];
 	//total_weight_list_size += last_layer_index * 4;
-	for (int i = 0; i < last_layer_index; i++) {
+	for (int i = 0; i < last_layer_index; ++i) {
 		weight_lists[i] = new float[node_list[i] * node_list[i + 1]];
 		//total_weight_list_size += node_list[i] * node_list[i + 1] * 4;
 	}
 
 	bias_lists = new float* [last_layer_index];
-	for (int i = 0; i < last_layer_index; i++) {
+	for (int i = 0; i < last_layer_index; ++i) {
 		bias_lists[i] = new float[node_list[i + 1]];
 	}
 
-	randomise_network();
+	all_gradients = new float[node_list[last_layer_index]];
+
+	randomise_network(-1.0f, 1.0f);
+	network_created = true;
 }
 
-void NeuralNetwork::randomise_network() {
+void NeuralNetwork::randomise_network(float min, float max) {
+	if (!network_created)
+		return;
+
 	for (int i = 0; i < last_layer_index; i++) {
 		//weights
-		for (int n = 0; n < node_list[i] * node_list[i + 1]; n++) {
-			weight_lists[i][n] = (float(rand()) / RAND_MAX) * 2 - 1;
+		for (int n = 0; n < node_list[i] * node_list[i + 1]; ++n) {
+			weight_lists[i][n] = min + (float(rand()) / RAND_MAX) * (max-min);
 		}
 		//biases
-		for (int n = 0; n < node_list[i + 1]; n++) {
-			bias_lists[i][n] = (float(rand()) / RAND_MAX) * 2 - 1;
+		for (int n = 0; n < node_list[i + 1]; ++n) {
+			bias_lists[i][n] = min + (float(rand()) / RAND_MAX) * (max - min);
 		}
 	}
 }
 
 float* NeuralNetwork::forward(float* input) {
+	if (!network_created)
+		return nullptr;
+
 	memcpy(value_lists[0], input, node_list[0] * sizeof(float));//copy input layer
 
 	//through layers
-	for (int layer_index = 1; layer_index < node_list.size(); layer_index++) {
+	for (int layer_index = 1; layer_index < node_list.size(); ++layer_index) {
 		//through nodes
 		int lower_layer = layer_index - 1;
-		for (int node_index = 0; node_index < node_list[layer_index]; node_index++) {
+		for (int node_index = 0; node_index < node_list[layer_index]; ++node_index) {
 			double sum = 0;
 			//weights * inputs
-			for (int prev_node_index = 0; prev_node_index < node_list[lower_layer]; prev_node_index++) {
+			for (int prev_node_index = 0; prev_node_index < node_list[lower_layer]; ++prev_node_index) {
 				sum += value_lists[lower_layer][prev_node_index] * weight_lists[lower_layer][node_index * node_list[lower_layer] + prev_node_index];
 			}
 
@@ -158,8 +188,62 @@ float* NeuralNetwork::forward(float* input) {
 	return value_lists[last_layer_index];
 }
 
+float* NeuralNetwork::forward_from_layer(float* input, int layer_index) {
+	if (!network_created)
+		return nullptr;
+
+	if (layer_index < 0 || layer_index >= node_list.size()-1) {
+		return nullptr;
+	}
+
+	memcpy(value_lists[layer_index], input, node_list[layer_index] * sizeof(float));//copy input layer
+
+	//through layers
+	for (int layer_index_ = layer_index+1; layer_index_ < node_list.size(); ++layer_index_) {
+		//through nodes
+		int lower_layer = layer_index_ - 1;
+		for (int node_index = 0; node_index < node_list[layer_index_]; ++node_index) {
+			double sum = 0;
+			//weights * inputs
+			for (int prev_node_index = 0; prev_node_index < node_list[lower_layer]; ++prev_node_index) {
+				sum += value_lists[lower_layer][prev_node_index] * weight_lists[lower_layer][node_index * node_list[lower_layer] + prev_node_index];
+			}
+
+			//bias
+			sum += bias_lists[lower_layer][node_index];
+
+			original_value_lists[layer_index_][node_index] = float(sum);
+
+			//activation function
+			if (activation_function_list[lower_layer] == TANH) {
+				sum = tanh(sum);
+			}
+			else if (activation_function_list[lower_layer] == SIGMOID) {
+				sum = sigmoid(sum);
+			}
+			else if (activation_function_list[lower_layer] == RELU) {
+				sum = sum < 0 ? 0 : sum;
+			}
+
+			value_lists[layer_index_][node_index] = float(sum);
+		}
+	}
+	return value_lists[last_layer_index];
+}
+
+float* NeuralNetwork::get_output_from_layer(int layer_index) {
+	if (!network_created)
+		return nullptr;
+
+	return value_lists[layer_index];
+}
+
 void NeuralNetwork::backward(const float learning_rate) {
-	for (int layer_index = last_layer_index; layer_index > 0; layer_index--) {
+
+	if (!network_created)
+		return;
+
+	for (int layer_index = last_layer_index; layer_index > 0; --layer_index) {
 		//activationfunction inverse
 		if (activation_function_list[layer_index - 1] == TANH) {
 			for (int i = 0; i < node_list[layer_index]; i++) {
@@ -178,16 +262,16 @@ void NeuralNetwork::backward(const float learning_rate) {
 		}
 
 		//dense inverse
-		for (int input_index = 0; input_index < node_list[layer_index - 1]; input_index++) {
+		for (int input_index = 0; input_index < node_list[layer_index - 1]; ++input_index) {
 			float input = value_lists[layer_index - 1][input_index];
 
 			//calc next gradient
 			value_lists[layer_index - 1][input_index] = 0;
-			for (int i = 0; i < node_list[layer_index]; i++) {
+			for (int i = 0; i < node_list[layer_index]; ++i) {
 				value_lists[layer_index - 1][input_index] += value_lists[layer_index][i] * weight_lists[layer_index - 1][i * node_list[layer_index - 1] + input_index];
 			}
 
-			for (int i = 0; i < node_list[layer_index]; i++) {
+			for (int i = 0; i < node_list[layer_index]; ++i) {
 				//calc weights
 				weight_lists[layer_index - 1][i * node_list[layer_index - 1] + input_index] -= learning_rate * value_lists[layer_index][i] * input;
 
@@ -199,16 +283,19 @@ void NeuralNetwork::backward(const float learning_rate) {
 }
 
 float NeuralNetwork::get_current_error(float* answer, const int loss_function) {
+	if (!network_created)
+		return -1;
+
 	int last_layer_size = node_list[last_layer_index];
 	float error = 0;
 	//loss_prime
 	if (loss_function == MSE) {
-		for (int i = 0; i < last_layer_size; i++) {
+		for (int i = 0; i < last_layer_size; ++i) {
 			error += (answer[i] - value_lists[last_layer_index][i]) * (answer[i] - value_lists[last_layer_index][i]);
 		}
 	}
 	else if (loss_function == BI_CROSS_ENTROPY) {
-		for (int i = 0; i < last_layer_size; i++) {
+		for (int i = 0; i < last_layer_size; ++i) {
 			error += (-answer[i] * log(value_lists[last_layer_index][i]) - (1.0f - answer[i]) * log(1.0f - value_lists[last_layer_index][i]));
 		}
 	}
@@ -220,18 +307,21 @@ float NeuralNetwork::get_current_error(float* answer, const int loss_function) {
 }
 
 float NeuralNetwork::loss_prime(const int loss_function, float* answer, float* gradient, const bool add_to_gradient) {
+	if (!network_created)
+		return -1;
+
 	int last_layer_size = node_list[last_layer_index];
 	float error = 0;
 	//loss_prime
 	if (loss_function == MSE) {
-		for (int i = 0; i < last_layer_size; i++) {
+		for (int i = 0; i < last_layer_size; ++i) {
 			error += (answer[i] - value_lists[last_layer_index][i]) * (answer[i] - value_lists[last_layer_index][i]);
 			gradient[i] = (2 * (value_lists[last_layer_index][i] - answer[i]) / last_layer_size) + (add_to_gradient ? gradient[i] : 0);
 		}
 		error /= last_layer_size;
 	}
 	else if (loss_function == BI_CROSS_ENTROPY) {
-		for (int i = 0; i < last_layer_size; i++) {
+		for (int i = 0; i < last_layer_size; ++i) {
 			//float _1 = -answer[i];
 			//float _2 = (1.0f - answer[i]);
 			//float log_1 = log(std::abs(value_lists[last_layer_index][i]) + 0.0000001f);
@@ -264,33 +354,33 @@ float NeuralNetwork::loss_prime(const int loss_function, float* answer, float* g
 }
 
 float NeuralNetwork::train_once(float* input, float* answer, const int loss_function, const float learning_rate) {
+	if (!network_created)
+		return -1;
+
 	forward(input);
 
 	//loss_prime
 	float error = loss_prime(loss_function, answer, value_lists[last_layer_index], false);
-	if (error == -1)
-		return -1;
 
 	backward(learning_rate);
-
-	//std::cout << value_lists[last_layer_index][0] << std::endl;
 
 	return error;
 }
 
 float NeuralNetwork::train_batch(float** input, float** answer, const int batch_length, const int loss_function, const float learning_rate) {
+	if (!network_created)
+		return -1;
+	
 	int last_layer_size = node_list[last_layer_index];
-	float* all_gradients = new float[last_layer_size];
+	memset(all_gradients, 0, last_layer_size * sizeof(float));
 
 	double error = 0;
-	double temp_error = 0;
 	for (int batch_index = 0; batch_index < batch_length; batch_index++) {
 		forward(input[batch_index]);
 
 		//loss_prime
-		temp_error = loss_prime(loss_function, answer[batch_index], all_gradients, true);
+		error += loss_prime(loss_function, answer[batch_index], all_gradients, true);
 
-		error += temp_error;
 	}
 	error /= batch_length;
 
@@ -300,7 +390,6 @@ float NeuralNetwork::train_batch(float** input, float** answer, const int batch_
 
 	//set gradient
 	memcpy(value_lists[last_layer_index], all_gradients, sizeof(float) * last_layer_size);
-	delete[] all_gradients;
 
 	backward(learning_rate);
 
@@ -308,6 +397,9 @@ float NeuralNetwork::train_batch(float** input, float** answer, const int batch_
 }
 
 void NeuralNetwork::train_list(float** input, float** answer, const int list_length, const int loss_function, const float learning_rate, int epoches, const bool print_to_console) {
+	if (!network_created)
+		return;
+	
 	if (output_error_to_file)
 		error_file.open(output_error_file);
 
@@ -330,7 +422,76 @@ void NeuralNetwork::train_list(float** input, float** answer, const int list_len
 		error_file.close();
 }
 
+bool NeuralNetwork::cut_network(int start_layer, int end_layer) {
+	if (!network_created)
+		return false;
+
+	if (start_layer < 0 || start_layer >= node_list.size() || end_layer < 0 || end_layer >= node_list.size() || start_layer > end_layer)
+		return false;
+
+
+	std::vector<int> old_node_list(node_list);
+	node_list.clear();
+	for (int i = start_layer; i <= end_layer; i++) {
+		node_list.push_back(old_node_list[i]);
+	}
+	std::vector<int> old_activation_function_list(activation_function_list);
+	activation_function_list.clear();
+	for (int i = start_layer; i < end_layer; i++) {
+		activation_function_list.push_back(old_activation_function_list[i]);
+	}
+
+	last_layer_index = node_list.size() - 1;
+
+	for (int i = 0; i < old_node_list.size(); i++) {
+		delete[] original_value_lists[i];
+		delete[] value_lists[i];
+	}
+	delete[] original_value_lists;
+	delete[] value_lists;
+
+	original_value_lists = new float* [node_list.size()];
+	value_lists = new float* [node_list.size()];
+	for (int i = 0; i < node_list.size(); i++) {
+		original_value_lists[i] = new float[node_list[i]];
+		value_lists[i] = new float[node_list[i]];
+	}
+
+
+	float** new_weight_lists = new float*[last_layer_index];
+	float** new_bias_lists = new float* [last_layer_index];
+	for (int i = 0; i < last_layer_index; i++) {
+		new_weight_lists[i] = new float[node_list[i] * node_list[i+1]];
+		memcpy(new_weight_lists[i], weight_lists[start_layer + i], sizeof(float) * node_list[i] * node_list[i + 1]);
+		
+		new_bias_lists[i] = new float[node_list[i+1]];
+		memcpy(new_bias_lists[i], bias_lists[start_layer + i], sizeof(float) * node_list[i+1]);
+	}
+
+
+	for (int i = 0; i < old_node_list.size() - 1; i++) {
+		delete[] weight_lists[i];
+		delete[] bias_lists[i];
+	}
+	delete[] weight_lists;
+	delete[] bias_lists;
+	weight_lists = new_weight_lists;
+	bias_lists = new_bias_lists;
+
+	delete[] all_gradients;
+	all_gradients = new float[node_list[last_layer_index]];
+
+	return true;
+}
+
 void NeuralNetwork::save_to_file(std::string file) {
+
+	if (sizeof(float) != 4)
+		return;
+
+	if (!network_created)
+		return;
+
 	int total_bias_count = 0;
 	int total_weight_count = 0;
 	for (int layer_index = 1; layer_index < node_list.size(); layer_index++) {
@@ -382,9 +543,19 @@ void NeuralNetwork::save_to_file(std::string file) {
 	auto myfile = std::fstream(file, std::ios::out | std::ios::binary);
 	myfile.write((char*)output_data, data_size);
 	myfile.close();
+
+	delete[] output_data;
 }
-void NeuralNetwork::load_from_file(std::string file) {
+
+bool NeuralNetwork::load_from_file(std::string file) {
+
+	if (sizeof(float) != 4)
+		return false;
+
 	std::ifstream input(file, std::ios::binary);
+	if (!input.is_open()) {
+		return false;
+	}
 	std::vector<char> file_data = std::vector<char>((std::istreambuf_iterator<char>(input)), (std::istreambuf_iterator<char>()));
 	input.close();
 
@@ -441,4 +612,9 @@ void NeuralNetwork::load_from_file(std::string file) {
 		value_lists[i] = new float[node_list[i]];
 		original_value_lists[i] = new float[node_list[i]];
 	}
+
+	all_gradients = new float[node_list[last_layer_index]];
+
+	network_created = true;
+	return true;
 }
