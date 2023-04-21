@@ -10,11 +10,8 @@ NeuralNetwork::NeuralNetwork() {
 	original_value_lists = nullptr;
 	weight_lists = nullptr;
 	bias_lists = nullptr;
-
-	if (sizeof(float) != 4) {
-		std::cout << "Warning! the size of a float is not 4 bytes. The network should work just fine, but saving and loading the model is not possible" << std::endl;
-	}
 }
+
 NeuralNetwork::~NeuralNetwork() {
 	delete_data();
 }
@@ -78,10 +75,12 @@ float NeuralNetwork::tanh_prime(float n) {
 	n = tanh(n);
 	return 1 - n * n;
 }
+
 float NeuralNetwork::sigmoid(float n) {
 	n = 1 / std::pow(e, n);
 	return 1 / (1 + n);
 }
+
 float NeuralNetwork::sigmoid_prime(float n) {
 	n = sigmoid(n);
 	return n * (1 - n);
@@ -510,23 +509,42 @@ void NeuralNetwork::save_to_file(std::string file) {
 
 	//layer count
 	length = 4;
-	memcpy(&(output_data[where_]), &size, length);
+	output_data[where_] = size & 0xFF;
+	output_data[where_ + 1] = (size & 0xFF00) >> 8;
+	output_data[where_ + 2] = (size & 0xFF0000) >> 16;
+	output_data[where_ + 3] = (size & 0xFF000000) >> 24;
 	where_ += length;
 
 	//node list
 	length = 4 * size;
-	memcpy(&(output_data[where_]), &(node_list[0]), length);
+	for (int i = 0; i < size;++i) {
+		output_data[where_ + i*4] = node_list[i] & 0xFF;
+		output_data[where_ + i*4 + 1] = (node_list[i] & 0xFF00) >> 8;
+		output_data[where_ + i*4 + 2] = (node_list[i] & 0xFF0000) >> 16;
+		output_data[where_ + i*4 + 3] = (node_list[i] & 0xFF000000) >> 24;
+	}
 	where_ += length;
 
 	//activation function
 	length = (size - 1) * 4;
-	memcpy(&(output_data[where_]), &(activation_function_list[0]), length);
+	for (int i = 0; i < size-1; ++i) {
+		output_data[where_ + i * 4] = activation_function_list[i] & 0xFF;
+		output_data[where_ + i * 4 + 1] = (activation_function_list[i] & 0xFF00) >> 8;
+		output_data[where_ + i * 4 + 2] = (activation_function_list[i] & 0xFF0000) >> 16;
+		output_data[where_ + i * 4 + 3] = (activation_function_list[i] & 0xFF000000) >> 24;
+	}
 	where_ += length;
 
 	//bias
 	for (int i = 0; i < size - 1; i++) {
 		length = 4 * node_list[i + 1];
-		memcpy(&(output_data[where_]), &(bias_lists[i][0]), length);
+		for (int n = 0; n < node_list[i + 1]; ++n) {
+			int32_t u = bias_lists[i][n] * 1000000;
+			output_data[where_ + n * 4] = u & 0xFF;
+			output_data[where_ + n * 4 + 1] = (u & 0xFF00) >> 8;
+			output_data[where_ + n * 4 + 2] = (u & 0xFF0000) >> 16;
+			output_data[where_ + n * 4 + 3] = (u & 0xFF000000) >> 24;
+		}
 		where_ += length;
 	}
 
@@ -534,6 +552,13 @@ void NeuralNetwork::save_to_file(std::string file) {
 	for (int i = 0; i < size - 1; i++) {
 		length = 4 * node_list[i] * node_list[i + 1];
 		memcpy(&(output_data[where_]), &(weight_lists[i][0]), length);
+		for (int n = 0; n < node_list[i] * node_list[i + 1]; ++n) {
+			int32_t u = weight_lists[i][n] * 1000000;
+			output_data[where_ + n * 4] = u & 0xFF;
+			output_data[where_ + n * 4 + 1] = (u & 0xFF00) >> 8;
+			output_data[where_ + n * 4 + 2] = (u & 0xFF0000) >> 16;
+			output_data[where_ + n * 4 + 3] = (u & 0xFF000000) >> 24;
+		}
 		where_ += length;
 	}
 
@@ -546,12 +571,23 @@ void NeuralNetwork::save_to_file(std::string file) {
 
 bool NeuralNetwork::load_from_file(std::string file) {
 
-	std::ifstream input(file, std::ios::binary);
-	if (!input.is_open()) {
+	// open the file
+	std::ifstream file_(file, std::ios::binary);
+	if (!file_.is_open()) {
 		return false;
 	}
-	std::vector<char> file_data = std::vector<char>((std::istreambuf_iterator<char>(input)), (std::istreambuf_iterator<char>()));
-	input.close();
+
+	file_.unsetf(std::ios::skipws);
+	std::streampos fileSize;
+	file_.seekg(0, std::ios::end);
+	fileSize = file_.tellg();
+	file_.seekg(0, std::ios::beg);
+	std::vector<uint8_t> file_data;
+	file_data.reserve(fileSize);
+	file_data.insert(file_data.begin(),
+		std::istream_iterator<uint8_t>(file_),
+		std::istream_iterator<uint8_t>());
+
 
 	delete_data();
 
@@ -559,11 +595,12 @@ bool NeuralNetwork::load_from_file(std::string file) {
 
 	size_t offset = 0;
 	size_t length = 0;
+	uint32_t u;
 
 	//set number of layers
 	int number_of_layers = 0;
 	length = 4;
-	memcpy(&number_of_layers, &file_data[0], length);
+	number_of_layers = (((((file_data[3] << 8) + file_data[2]) << 8) + file_data[1]) << 8) + file_data[0];
 	offset += length;
 
 	last_layer_index = number_of_layers - 1;
@@ -571,14 +608,16 @@ bool NeuralNetwork::load_from_file(std::string file) {
 	//create node_list
 	length = 4;
 	for (int i = 0; i < number_of_layers; i++) {
-		node_list.push_back(*(int*)&file_data[offset]);
+		int num = (((((file_data[offset + 3] << 8) + file_data[offset + 2]) << 8) + file_data[offset + 1]) << 8) + file_data[offset + 0];
+		node_list.push_back(num);
 		offset += length;
 	}
 
 	//set activation functions
 	length = 4;
 	for (int i = 0; i < number_of_layers - 1; i++) {
-		activation_function_list.push_back(*(int*)&file_data[offset]);
+		int act = (((((file_data[offset + 3] << 8) + file_data[offset + 2]) << 8) + file_data[offset + 1]) << 8) + file_data[offset + 0];//*(int*)&file_data[offset]
+		activation_function_list.push_back(act);
 		offset += length;
 	}
 
@@ -586,18 +625,22 @@ bool NeuralNetwork::load_from_file(std::string file) {
 	bias_lists = new float* [number_of_layers - 1];
 	for (int i = 0; i < number_of_layers - 1; i++) {
 		bias_lists[i] = new float[node_list[i + 1]];
-		length = 4 * node_list[i + 1];
-		memcpy(&(bias_lists[i][0]), &(file_data[offset]), length);
-		offset += length;
+		for (int n = 0; n < node_list[i + 1]; n++) {
+			uint32_t u = (((((file_data[offset + 3] << 8) + file_data[offset + 2]) << 8) + file_data[offset + 1]) << 8) + file_data[offset + 0];
+			bias_lists[i][n] = (*(int32_t*) & u) / 1000000.0;
+			offset += 4;
+		}
 	}
 
 	//set weights
 	weight_lists = new float* [number_of_layers - 1];
 	for (int i = 0; i < number_of_layers - 1; i++) {
 		weight_lists[i] = new float[node_list[i + 1] * node_list[i]];
-		length = 4 * node_list[i + 1] * node_list[i];
-		memcpy(&(weight_lists[i][0]), &(file_data[offset]), length);
-		offset += length;
+		for (int n = 0; n < node_list[i + 1] * node_list[i]; n++) {
+			uint32_t u = (((((file_data[offset + 3] << 8) + file_data[offset + 2]) << 8) + file_data[offset + 1]) << 8) + file_data[offset + 0];
+			weight_lists[i][n] = (*(int32_t*)&u) / 1000000.0;
+			offset += 4;
+		}
 	}
 
 	value_lists = new float* [node_list.size()];

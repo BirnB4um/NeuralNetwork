@@ -4,6 +4,7 @@
 #include <time.h>
 #include <iostream>
 #include <fstream>
+#include <istream>
 #include <string>
 
 #define e 2.7182818284
@@ -28,9 +29,8 @@ private:
 	std::string output_error_file;
 	std::ofstream error_file;
 
-	//int total_weight_list_size;
-	//int total_bias_list_size;
 	void delete_data();
+
 
 public:
 
@@ -57,14 +57,40 @@ public:
 
 	float get_current_error(float* answer, const int loss_function);
 
+	/*
+	add layers to the network.
+	The activation function of the first layer does not get used!
+	*/
 	void add_layer(int nodes, int activation_function = 0);
+
+	/*
+	create the network from specified layers.
+	Call this methode after adding layers with add_layer(...)
+	*/
 	void create();
 	void copy_output(float* out);
+
+	/*
+	randomise weights and biases
+	*/
 	void randomise_network(float min = -1.0f, float max = 1.0f);
 
+	/*
+	input has to be exact size of input nodes
+	*/
 	float* forward(float* input);
+
+	/*
+	input size has to match size of nodes in the given layer
+	*/
 	float* forward_from_layer(float* input, int layer_index);
+
 	void backward(float learning_rate);
+
+	/*
+	get a pointer to values in network on given layer.
+	This should be a read only pointer.
+	*/
 	float* get_output_from_layer(int layer_index);
 
 	float train_once(float* input, float* answer, const int loss_function, const float learning_rate = 0.001);
@@ -80,6 +106,14 @@ public:
 	*/
 	bool cut_network(int start_layer, int end_layer);
 
+	/*
+	save model to file
+	*/
 	void save_to_file(std::string file);
+
+	/*
+	loads model from file.
+	returns true if worked
+	*/
 	bool load_from_file(std::string file);
 };
